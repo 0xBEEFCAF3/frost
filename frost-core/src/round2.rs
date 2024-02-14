@@ -92,7 +92,7 @@ where
         challenge: &Challenge<C>,
         group_commitment: &frost::GroupCommitment<C>,
         verifying_key: &frost::VerifyingKey<C>,
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> Result<(), Error<C>> {
         let mut commitment_share = group_commitment_share.0;
         let mut vsh = verifying_share.0;
@@ -228,7 +228,7 @@ pub fn sign<C: Ciphersuite>(
     let lambda_i = frost::derive_interpolating_value(key_package.identifier(), signing_package)?;
 
     // Extract any additional tweak
-    let additional_tweak = signing_package.additional_tweak();
+    let additional_tweak = signing_package.additional_tweak_as_slice();
     // Compute the per-message challenge.
     let challenge = <C>::challenge(
         &group_commitment.0,

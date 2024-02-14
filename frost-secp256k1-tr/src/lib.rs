@@ -197,7 +197,7 @@ pub fn hasher_to_scalar(hasher: Sha256) -> Scalar {
 /// Take arbitrary data and convert it to a scalar
 pub fn additional_tweak_scalar(
     public_key: &<<Secp256K1Sha256 as Ciphersuite>::Group as Group>::Element,
-    data: &Vec<u8>,
+    data: &[u8],
 ) -> Scalar {
     let mut hasher = Sha256::new();
     hasher.update(public_key.to_affine().x());
@@ -231,7 +231,7 @@ pub fn tweak(
 pub fn tweaked_public_key(
     public_key: &<<Secp256K1Sha256 as Ciphersuite>::Group as Group>::Element,
     merkle_root: &[u8],
-    additional_tweak: &Option<Vec<u8>>,
+    additional_tweak: Option<&[u8]>,
 ) -> <<Secp256K1Sha256 as Ciphersuite>::Group as Group>::Element {
     let mut pk = public_key.clone();
     if public_key.to_affine().y_is_odd().into() {
@@ -251,7 +251,7 @@ pub fn tweaked_public_key(
 pub fn real_tweaked_pubkey(
     public_key: &<<Secp256K1Sha256 as Ciphersuite>::Group as Group>::Element,
     merkle_root: &[u8],
-    additional_tweak: &Option<Vec<u8>>,
+    additional_tweak: Option<&[u8]>,
 ) -> <<Secp256K1Sha256 as Ciphersuite>::Group as Group>::Element {
     let tweaked_pubkey = tweaked_public_key(public_key, merkle_root, additional_tweak);
     AffinePoint::decompact(&tweaked_pubkey.to_affine().x())
@@ -264,7 +264,7 @@ pub fn tweaked_secret_key(
     secret: <<<Secp256K1Sha256 as Ciphersuite>::Group as Group>::Field as Field>::Scalar,
     public_key: &<<Secp256K1Sha256 as Ciphersuite>::Group as Group>::Element,
     merkle_root: &[u8],
-    additional_tweak: &Option<Vec<u8>>,
+    additional_tweak: Option<&[u8]>,
 ) -> <<<Secp256K1Sha256 as Ciphersuite>::Group as Group>::Field as Field>::Scalar {
     if public_key.to_affine().y_is_odd().into() {
         if let Some(t) = additional_tweak {
@@ -348,7 +348,7 @@ impl Ciphersuite for Secp256K1Sha256 {
         R: &Element<S>,
         verifying_key: &VerifyingKey,
         msg: &[u8],
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> Challenge<S> {
         let mut preimage = vec![];
         let tweaked_public_key =
@@ -369,7 +369,7 @@ impl Ciphersuite for Secp256K1Sha256 {
         z: <<Self::Group as Group>::Field as Field>::Scalar,
         challenge: &Challenge<S>,
         verifying_key: &Element<S>,
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> <<Self::Group as Group>::Field as Field>::Scalar {
         let t = tweak(&verifying_key, &[]);
         // let at = additional_tweak_scalar(&verifying_key, )
@@ -392,7 +392,7 @@ impl Ciphersuite for Secp256K1Sha256 {
         secret: <<Self::Group as Group>::Field as Field>::Scalar,
         challenge: <<Self::Group as Group>::Field as Field>::Scalar,
         verifying_key: &Element<S>,
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> <<Self::Group as Group>::Field as Field>::Scalar {
         let tweaked_pubkey = tweaked_public_key(&verifying_key, &[], additional_tweak);
         if tweaked_pubkey.to_affine().y_is_odd().into() {
@@ -410,7 +410,7 @@ impl Ciphersuite for Secp256K1Sha256 {
         lambda_i: <<Self::Group as Group>::Field as Field>::Scalar,
         key_package: &frost::keys::KeyPackage<S>,
         challenge: Challenge<S>,
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> round2::SignatureShare {
         let mut sn = signer_nonces.clone();
         if group_commitment.y_is_odd() {
@@ -435,7 +435,7 @@ impl Ciphersuite for Secp256K1Sha256 {
     /// calculate tweaked public key
     fn tweaked_public_key(
         public_key: &<Self::Group as Group>::Element,
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> <Self::Group as Group>::Element {
         real_tweaked_pubkey(public_key, &[], additional_tweak)
     }
@@ -449,7 +449,7 @@ impl Ciphersuite for Secp256K1Sha256 {
     fn tweaked_secret_key(
         secret: <<Self::Group as Group>::Field as Field>::Scalar,
         public: &Element<Self>,
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> <<Self::Group as Group>::Field as Field>::Scalar {
         tweaked_secret_key(secret, &public, &[], additional_tweak)
     }
@@ -482,7 +482,7 @@ impl Ciphersuite for Secp256K1Sha256 {
     fn taproot_compat_verifying_share(
         verifying_share: &<Self::Group as Group>::Element,
         verifying_key: &<Self::Group as Group>::Element,
-        arbitrary_tweak: &Option<Vec<u8>>,
+        arbitrary_tweak: Option<&[u8]>,
     ) -> <Self::Group as Group>::Element {
         let mut vs = verifying_share.clone();
         let pubkey_is_odd: bool = verifying_key.to_affine().y_is_odd().into();

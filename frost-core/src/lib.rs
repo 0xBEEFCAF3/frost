@@ -105,7 +105,12 @@ where
 /// [RFC]: https://www.ietf.org/archive/id/draft-irtf-cfrg-frost-14.html#section-3.2
 #[cfg_attr(feature = "internals", visibility::make(pub))]
 #[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
-fn challenge<C>(R: &Element<C>, verifying_key: &VerifyingKey<C>, msg: &[u8], _additional_tweak: &Option<Vec<u8>>) -> Challenge<C>
+fn challenge<C>(
+    R: &Element<C>,
+    verifying_key: &VerifyingKey<C>,
+    msg: &[u8],
+    _additional_tweak: Option<&[u8]>,
+) -> Challenge<C>
 where
     C: Ciphersuite,
 {
@@ -395,6 +400,15 @@ where
         self.additional_tweak = Some(additional_tweak);
     }
 
+    /// Return additional tweak as slice
+    pub fn additional_tweak_as_slice(&self) -> Option<&[u8]> {
+        if let Some(t) = &self.additional_tweak {
+            return Some(t.as_slice());
+        }
+
+        None
+    }
+
     /// Get a signing commitment by its participant identifier, or None if not found.
     pub fn signing_commitment(
         &self,
@@ -598,7 +612,7 @@ where
         z = z + signature_share.share;
     }
 
-    let additional_tweak = signing_package.additional_tweak();
+    let additional_tweak = signing_package.additional_tweak_as_slice();
     if <C>::is_taproot_compat() {
         let challenge = <C>::challenge(
             &group_commitment.0,
@@ -606,7 +620,12 @@ where
             signing_package.message().as_slice(),
             additional_tweak,
         );
-        z = <C>::aggregate_tweak_z(z, &challenge, &pubkeys.verifying_key.element, additional_tweak);
+        z = <C>::aggregate_tweak_z(
+            z,
+            &challenge,
+            &pubkeys.verifying_key.element,
+            additional_tweak,
+        );
     }
 
     let signature = Signature {

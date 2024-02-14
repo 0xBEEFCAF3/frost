@@ -50,7 +50,7 @@ where
         &self,
         mut rng: R,
         msg: &[u8],
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> Signature<C> {
         let public = VerifyingKey::<C>::from(*self);
         let mut secret = self.scalar;

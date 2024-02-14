@@ -7,8 +7,7 @@ use std::{
 
 use rand_core::{CryptoRng, RngCore};
 
-use crate::{Error, FieldError, GroupError, Signature, VerifyingKey, Challenge,
-            challenge};
+use crate::{challenge, Challenge, Error, FieldError, GroupError, Signature, VerifyingKey};
 
 /// A prime order finite field GF(q) over which all scalar values for our prime order group can be
 /// multiplied are defined.
@@ -236,7 +235,7 @@ pub trait Ciphersuite: Copy + Clone + PartialEq + Debug {
         msg: &[u8],
         signature: &Signature<Self>,
         public_key: &VerifyingKey<Self>,
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> Result<(), Error<Self>> {
         let c = <Self>::challenge(&signature.R, public_key, msg, additional_tweak);
 
@@ -256,7 +255,7 @@ pub trait Ciphersuite: Copy + Clone + PartialEq + Debug {
         R: &Element<Self>,
         verifying_key: &VerifyingKey<Self>,
         msg: &[u8],
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> Challenge<Self> {
         challenge(R, verifying_key, msg, additional_tweak)
     }
@@ -272,7 +271,7 @@ pub trait Ciphersuite: Copy + Clone + PartialEq + Debug {
         z: <<Self::Group as Group>::Field as Field>::Scalar,
         challenge: &Challenge<Self>,
         verifying_key: &Element<Self>,
-        arbitrary_tweak: &Option<Vec<u8>>,
+        arbitrary_tweak: Option<&[u8]>,
     ) -> <<Self::Group as Group>::Field as Field>::Scalar {
         panic!("Not implemented");
     }
@@ -284,7 +283,7 @@ pub trait Ciphersuite: Copy + Clone + PartialEq + Debug {
         secret: <<Self::Group as Group>::Field as Field>::Scalar,
         challenge: <<Self::Group as Group>::Field as Field>::Scalar,
         verifying_key: &Element<Self>,
-        arbitrary_tweak: &Option<Vec<u8>>,
+        arbitrary_tweak: Option<&[u8]>,
     ) -> <<Self::Group as Group>::Field as Field>::Scalar {
         panic!("Not implemented");
     }
@@ -298,7 +297,7 @@ pub trait Ciphersuite: Copy + Clone + PartialEq + Debug {
         lambda_i: <<Self::Group as Group>::Field as Field>::Scalar,
         key_package: &crate::keys::KeyPackage<Self>,
         challenge: Challenge<Self>,
-        arbitrary_tweak: &Option<Vec<u8>>,
+        arbitrary_tweak: Option<&[u8]>,
     ) -> crate::round2::SignatureShare<Self> {
         panic!("Not implemented");
     }
@@ -307,7 +306,7 @@ pub trait Ciphersuite: Copy + Clone + PartialEq + Debug {
     #[allow(unused)]
     fn tweaked_public_key(
         public_key: &<Self::Group as Group>::Element,
-        arbitrary_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> <Self::Group as Group>::Element {
         panic!("Not implemented");
     }
@@ -325,7 +324,7 @@ pub trait Ciphersuite: Copy + Clone + PartialEq + Debug {
     fn tweaked_secret_key(
         secret: <<Self::Group as Group>::Field as Field>::Scalar,
         public: &Element<Self>,
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> <<Self::Group as Group>::Field as Field>::Scalar {
         panic!("Not implemented");
     }
@@ -353,7 +352,7 @@ pub trait Ciphersuite: Copy + Clone + PartialEq + Debug {
     fn taproot_compat_verifying_share(
         verifying_share: &<Self::Group as Group>::Element,
         verifying_key: &<Self::Group as Group>::Element,
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> <Self::Group as Group>::Element {
         panic!("Not implemented");
     }

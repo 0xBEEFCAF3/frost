@@ -32,8 +32,8 @@ where
 {
     fn from((vk, sig, msg): (VerifyingKey<C>, Signature<C>, &'msg M)) -> Self {
         // Compute c now to avoid dependency on the msg lifetime.
-        // TODO(armins) assuming no additional tweaks on batching operations 
-        let c = <C>::challenge(&sig.R, &vk, msg.as_ref(), &None);
+        // TODO(armins) assuming no additional tweaks on batching operations
+        let c = <C>::challenge(&sig.R, &vk, msg.as_ref(), None);
 
         Self { vk, sig, c }
     }
@@ -52,7 +52,7 @@ where
     /// from the lifetime of the message.
     pub fn verify_single(self) -> Result<(), Error<C>> {
         // TODO(armins) assuming no additional tweaks on batching operations
-        self.vk.verify_prehashed(self.c, &self.sig, &None)
+        self.vk.verify_prehashed(self.c, &self.sig, None)
     }
 }
 
@@ -124,7 +124,7 @@ where
             let mut vk = item.vk.element;
             if <C>::is_taproot_compat() {
                 R = <C>::taproot_compat_R(&item.sig.R);
-                vk = <C>::tweaked_public_key(&item.vk.element, &None);
+                vk = <C>::tweaked_public_key(&item.vk.element, None);
             }
 
             let blind = <<C::Group as Group>::Field>::random(&mut rng);

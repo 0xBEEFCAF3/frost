@@ -63,7 +63,7 @@ where
         &self,
         challenge: Challenge<C>,
         signature: &Signature<C>,
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> Result<(), Error<C>> {
         // Verify check is h * ( - z * B + R  + c * A) == 0
         //                 h * ( z * B - c * A - R) == 0
@@ -91,7 +91,7 @@ where
         &self,
         msg: &[u8],
         signature: &Signature<C>,
-        additional_tweak: &Option<Vec<u8>>,
+        additional_tweak: Option<&[u8]>,
     ) -> Result<(), Error<C>> {
         C::verify_signature(msg, signature, self, additional_tweak)
     }
