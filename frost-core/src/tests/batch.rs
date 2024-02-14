@@ -8,8 +8,8 @@ pub fn batch_verify<C: Ciphersuite, R: RngCore + CryptoRng>(mut rng: R) {
         let sk = SigningKey::new(&mut rng);
         let vk = VerifyingKey::<C>::from(&sk);
         let msg = b"BatchVerifyTest";
-        let sig = sk.sign(&mut rng, &msg[..]);
-        assert!(vk.verify(msg, &sig).is_ok());
+        let sig = sk.sign(&mut rng, &msg[..], &None);
+        assert!(vk.verify(msg, &sig, &None).is_ok());
         batch.queue((vk, sig, msg));
     }
     assert!(batch.verify(rng).is_ok());
@@ -27,9 +27,9 @@ pub fn bad_batch_verify<C: Ciphersuite, R: RngCore + CryptoRng>(mut rng: R) {
                 let vk = VerifyingKey::<C>::from(&sk);
                 let msg = b"BatchVerifyTest";
                 let sig = if i != bad_index {
-                    sk.sign(&mut rng, &msg[..])
+                    sk.sign(&mut rng, &msg[..], &None)
                 } else {
-                    sk.sign(&mut rng, b"bad")
+                    sk.sign(&mut rng, b"bad", &None)
                 };
                 (vk, sig, msg).into()
             }
@@ -37,7 +37,7 @@ pub fn bad_batch_verify<C: Ciphersuite, R: RngCore + CryptoRng>(mut rng: R) {
                 let sk = SigningKey::new(&mut rng);
                 let vk = VerifyingKey::<C>::from(&sk);
                 let msg = b"BatchVerifyTest";
-                let sig = sk.sign(&mut rng, &msg[..]);
+                let sig = sk.sign(&mut rng, &msg[..], &None);
                 (vk, sig, msg).into()
             }
             _ => unreachable!(),

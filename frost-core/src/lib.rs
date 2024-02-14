@@ -105,7 +105,7 @@ where
 /// [RFC]: https://www.ietf.org/archive/id/draft-irtf-cfrg-frost-14.html#section-3.2
 #[cfg_attr(feature = "internals", visibility::make(pub))]
 #[cfg_attr(docsrs, doc(cfg(feature = "internals")))]
-fn challenge<C>(R: &Element<C>, verifying_key: &VerifyingKey<C>, msg: &[u8]) -> Challenge<C>
+fn challenge<C>(R: &Element<C>, verifying_key: &VerifyingKey<C>, msg: &[u8], _additional_tweak: &Option<Vec<u8>>) -> Challenge<C>
 where
     C: Ciphersuite,
 {
@@ -365,6 +365,9 @@ pub struct SigningPackage<C: Ciphersuite> {
         )
     )]
     message: Vec<u8>,
+    /// Additional tweak for both the secret share and the verifying key
+    #[cfg_attr(feature = "serde", serde(skip))]
+    additional_tweak: Option<Vec<u8>>,
 }
 
 impl<C> SigningPackage<C>
@@ -382,7 +385,14 @@ where
             header: Header::default(),
             signing_commitments,
             message: message.to_vec(),
+            // Set the additional tweak to None by default
+            additional_tweak: None,
         }
+    }
+
+    /// Sets the additional tweak for both the secret share and the verifying key
+    pub fn set_addtional_tweak(&mut self, additional_tweak: Vec<u8>) {
+        self.additional_tweak = Some(additional_tweak);
     }
 
     /// Get a signing commitment by its participant identifier, or None if not found.
@@ -588,24 +598,26 @@ where
         z = z + signature_share.share;
     }
 
+    let additional_tweak = signing_package.additional_tweak();
     if <C>::is_taproot_compat() {
         let challenge = <C>::challenge(
             &group_commitment.0,
             &pubkeys.verifying_key,
             signing_package.message().as_slice(),
+            additional_tweak,
         );
-        z = <C>::aggregate_tweak_z(z, &challenge, &pubkeys.verifying_key.element);
+        z = <C>::aggregate_tweak_z(z, &challenge, &pubkeys.verifying_key.element, additional_tweak);
     }
 
     let signature = Signature {
         R: group_commitment.0,
         z,
     };
-
     // Verify the aggregate signature
-    let verification_result = pubkeys
-        .verifying_key
-        .verify(signing_package.message(), &signature);
+    let verification_result =
+        pubkeys
+            .verifying_key
+            .verify(signing_package.message(), &signature, additional_tweak);
 
     // Only if the verification of the aggregate signature failed; verify each share to find the cheater.
     // This approach is more efficient since we don't need to verify all shares
@@ -617,6 +629,7 @@ where
             &group_commitment.0,
             &pubkeys.verifying_key,
             signing_package.message().as_slice(),
+            additional_tweak,
         );
 
         // Verify the signature shares.
@@ -650,6 +663,7 @@ where
                 &challenge,
                 &group_commitment,
                 &pubkeys.verifying_key,
+                additional_tweak,
             )?;
         }
 

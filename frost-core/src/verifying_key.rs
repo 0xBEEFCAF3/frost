@@ -1,5 +1,5 @@
-use std::fmt::{self, Debug};
 use derive_getters::Getters;
+use std::fmt::{self, Debug};
 
 #[cfg(any(test, feature = "test-impl"))]
 use hex::FromHex;
@@ -63,6 +63,7 @@ where
         &self,
         challenge: Challenge<C>,
         signature: &Signature<C>,
+        additional_tweak: &Option<Vec<u8>>,
     ) -> Result<(), Error<C>> {
         // Verify check is h * ( - z * B + R  + c * A) == 0
         //                 h * ( z * B - c * A - R) == 0
@@ -72,7 +73,7 @@ where
         let mut vk = self.element;
         if <C>::is_taproot_compat() {
             R = <C>::taproot_compat_R(&signature.R);
-            vk = <C>::tweaked_public_key(&self.element);
+            vk = <C>::tweaked_public_key(&self.element, additional_tweak);
         }
         let zB = C::Group::generator() * signature.z;
         let cA = vk * challenge.0;
@@ -86,8 +87,13 @@ where
     }
 
     /// Verify a purported `signature` over `msg` made by this verification key.
-    pub fn verify(&self, msg: &[u8], signature: &Signature<C>) -> Result<(), Error<C>> {
-        C::verify_signature(msg, signature, self)
+    pub fn verify(
+        &self,
+        msg: &[u8],
+        signature: &Signature<C>,
+        additional_tweak: &Option<Vec<u8>>,
+    ) -> Result<(), Error<C>> {
+        C::verify_signature(msg, signature, self, additional_tweak)
     }
 
     /// Computes the group public key given the group commitment.

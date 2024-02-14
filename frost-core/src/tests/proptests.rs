@@ -42,7 +42,7 @@ where
     /// Create a new SignatureCase.
     pub fn new<R: RngCore + CryptoRng>(mut rng: R, msg: Vec<u8>) -> Self {
         let sk = SigningKey::<C>::new(&mut rng);
-        let sig = sk.sign(&mut rng, &msg);
+        let sig = sk.sign(&mut rng, &msg, &None);
         let vk = VerifyingKey::<C>::from(&sk);
         let invalid_vk = VerifyingKey::<C>::from(&SigningKey::new(&mut rng));
         Self {
@@ -68,7 +68,7 @@ where
             .expect("The test verification key to be well-formed.");
 
         // Check that signature validation has the expected result.
-        self.is_valid == self.vk.verify(&self.msg, &self.sig).is_ok()
+        self.is_valid == self.vk.verify(&self.msg, &self.sig, &None).is_ok()
     }
 
     /// Apply the given tweak to the signature test case.

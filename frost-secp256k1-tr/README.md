@@ -112,7 +112,7 @@ let group_signature = frost::aggregate(&signing_package, &signature_shares, &pub
 # // ANCHOR: verify
 let is_signature_valid = pubkey_package
     .verifying_key()
-    .verify(message, &group_signature)
+    .verify(message, &group_signature, &None)
     .is_ok();
 # // ANCHOR_END: verify
 assert!(is_signature_valid);

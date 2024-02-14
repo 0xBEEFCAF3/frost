@@ -22,7 +22,7 @@ fn sigs_with_distinct_keys<C: Ciphersuite, R: RngCore + CryptoRng + Clone>(
         let msg = b"Bench";
         let sk = SigningKey::new(&mut rng);
         let vk = VerifyingKey::from(&sk);
-        let sig = sk.sign(&mut rng, &msg[..]);
+        let sig = sk.sign(&mut rng, &msg[..], &None);
         Item { vk, sig }
     })
 }
@@ -50,7 +50,7 @@ pub fn bench_batch_verify<C: Ciphersuite, R: RngCore + CryptoRng + Clone>(
                         let msg = b"Bench";
 
                         let Item { vk, sig } = item;
-                        let _ = vk.verify(msg, sig);
+                        let _ = vk.verify(msg, sig, &None);
                     }
                 })
             },

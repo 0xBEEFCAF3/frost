@@ -268,7 +268,7 @@ pub fn check_sign<C: Ciphersuite + PartialEq, R: RngCore + CryptoRng>(
     // key (the verification key).
     pubkey_package
         .verifying_key
-        .verify(message, &group_signature)?;
+        .verify(message, &group_signature, &None)?;
 
     // Check that the threshold signature can be verified by the group public
     // key (the verification key) from KeyPackage.verifying_key
@@ -277,7 +277,7 @@ pub fn check_sign<C: Ciphersuite + PartialEq, R: RngCore + CryptoRng>(
 
         key_package
             .verifying_key
-            .verify(message, &group_signature)?;
+            .verify(message, &group_signature, &None)?;
     }
 
     Ok((

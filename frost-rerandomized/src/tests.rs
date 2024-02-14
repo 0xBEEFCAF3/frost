@@ -107,7 +107,7 @@ pub fn check_randomized_sign_with_dealer<C: RandomizedCiphersuite, R: RngCore + 
     // key (the verification key).
     assert!(randomizer_params
         .randomized_verifying_key()
-        .verify(message, &group_signature)
+        .verify(message, &group_signature, &None)
         .is_ok());
 
     // Note that key_package.verifying_key can't be used to verify the signature

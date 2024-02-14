@@ -2,7 +2,9 @@
 
 use rand_core::{CryptoRng, RngCore};
 
-use crate::{random_nonzero, Ciphersuite, Error, Field, Group, Scalar, Signature, VerifyingKey, Challenge};
+use crate::{
+    random_nonzero, Challenge, Ciphersuite, Error, Field, Group, Scalar, Signature, VerifyingKey,
+};
 
 /// A signing key for a Schnorr signature on a FROST [`Ciphersuite::Group`].
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -44,11 +46,16 @@ where
     }
 
     /// Create a signature `msg` using this `SigningKey`.
-    pub fn sign<R: RngCore + CryptoRng>(&self, mut rng: R, msg: &[u8]) -> Signature<C> {
+    pub fn sign<R: RngCore + CryptoRng>(
+        &self,
+        mut rng: R,
+        msg: &[u8],
+        additional_tweak: &Option<Vec<u8>>,
+    ) -> Signature<C> {
         let public = VerifyingKey::<C>::from(*self);
         let mut secret = self.scalar;
         if <C>::is_taproot_compat() {
-            secret = <C>::tweaked_secret_key(secret, &public.element);
+            secret = <C>::tweaked_secret_key(secret, &public.element, additional_tweak);
         }
         let mut k = random_nonzero::<C, R>(&mut rng);
         let R = <C::Group>::generator() * k;
@@ -57,10 +64,10 @@ where
         }
 
         // Generate Schnorr challenge
-        let c: Challenge<C> = <C>::challenge(&R, &public, msg);
+        let c: Challenge<C> = <C>::challenge(&R, &public, msg, additional_tweak);
 
         if <C>::is_taproot_compat() {
-            let z = <C>::tweaked_z(k, secret, c.0, &public.element);
+            let z = <C>::tweaked_z(k, secret, c.0, &public.element, additional_tweak);
             Signature { R, z }
         } else {
             let z = k + (c.0 * secret);

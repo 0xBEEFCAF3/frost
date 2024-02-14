@@ -92,17 +92,19 @@ where
         challenge: &Challenge<C>,
         group_commitment: &frost::GroupCommitment<C>,
         verifying_key: &frost::VerifyingKey<C>,
+        additional_tweak: &Option<Vec<u8>>,
     ) -> Result<(), Error<C>> {
         let mut commitment_share = group_commitment_share.0;
         let mut vsh = verifying_share.0;
         if <C>::is_taproot_compat() {
             commitment_share = <C>::taproot_compat_commitment_share(
                 &group_commitment_share.0,
-                &group_commitment.0
+                &group_commitment.0,
             );
             vsh = <C>::taproot_compat_verifying_share(
                 &verifying_share.0,
-                &verifying_key.element
+                &verifying_key.element,
+                additional_tweak,
             );
         }
         if (<C::Group>::generator() * self.share)
@@ -225,11 +227,14 @@ pub fn sign<C: Ciphersuite>(
     // Compute Lagrange coefficient.
     let lambda_i = frost::derive_interpolating_value(key_package.identifier(), signing_package)?;
 
+    // Extract any additional tweak
+    let additional_tweak = signing_package.additional_tweak();
     // Compute the per-message challenge.
     let challenge = <C>::challenge(
         &group_commitment.0,
         &key_package.verifying_key,
         signing_package.message.as_slice(),
+        additional_tweak,
     );
 
     // Compute the Schnorr signature share.
@@ -241,6 +246,7 @@ pub fn sign<C: Ciphersuite>(
             lambda_i,
             key_package,
             challenge,
+            additional_tweak,
         );
 
         Ok(signature_share)
