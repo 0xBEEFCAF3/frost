@@ -371,7 +371,6 @@ pub struct SigningPackage<C: Ciphersuite> {
     )]
     message: Vec<u8>,
     /// Additional tweak for both the secret share and the verifying key
-    #[cfg_attr(feature = "serde", serde(skip))]
     additional_tweak: Option<Vec<u8>>,
 }
 
