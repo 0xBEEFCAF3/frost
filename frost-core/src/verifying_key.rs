@@ -43,6 +43,13 @@ where
         <C::Group as Group>::y_is_odd(&self.element)
     }
 
+    /// Get verifying key with tweaks applied
+    pub fn get_tweaked(&self, additional_tweak: Option<&[u8]>) -> Self {
+        Self {
+            element: <C>::tweaked_public_key(&self.element, additional_tweak),
+        }
+    }
+
     /// Deserialize from bytes
     pub fn deserialize(
         bytes: <C::Group as Group>::Serialization,
