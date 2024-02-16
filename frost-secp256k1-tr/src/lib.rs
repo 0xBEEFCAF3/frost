@@ -234,17 +234,15 @@ pub fn tweaked_public_key(
     additional_tweak: Option<&[u8]>,
 ) -> <<Secp256K1Sha256 as Ciphersuite>::Group as Group>::Element {
     let mut pk = public_key.clone();
-    if public_key.to_affine().y_is_odd().into() {
+    if pk.to_affine().y_is_odd().into() {
         pk = -pk;
     }
     if let Some(t) = additional_tweak {
-        // G * (additional_tweak + tweak(pk, merkle_root)) + pk
-        return ProjectivePoint::GENERATOR
-            * (additional_tweak_scalar(&pk, t) + tweak(&pk, merkle_root))
-            + pk;
+        let e = additional_tweak_scalar(&pk, t);
+        pk = ProjectivePoint::GENERATOR * e + pk;
     }
-
-    ProjectivePoint::GENERATOR * tweak(&pk, merkle_root) + pk
+    let t = tweak(&pk, merkle_root);
+    ProjectivePoint::GENERATOR * t + pk
 }
 
 /// Creates a real BIP341 tweaked public key by assuming an even y-coordinate.
@@ -371,14 +369,26 @@ impl Ciphersuite for Secp256K1Sha256 {
         verifying_key: &Element<S>,
         additional_tweak: Option<&[u8]>,
     ) -> <<Self::Group as Group>::Field as Field>::Scalar {
-        let t = tweak(&verifying_key, &[]);
-        // let at = additional_tweak_scalar(&verifying_key, )
-        let mut tc = t * challenge.clone().to_scalar();
-        if let Some(addition_tweak) = additional_tweak {
-            tc = (t + additional_tweak_scalar(verifying_key, addition_tweak))
-                * challenge.clone().to_scalar();
-        }
         let tweaked_pubkey = tweaked_public_key(&verifying_key, &[], additional_tweak);
+        let mut t = tweak(&verifying_key, &[]);
+        let mut tc = t * challenge.clone().to_scalar();
+
+        if let Some(addition_tweak) = additional_tweak {
+            let mut pk = verifying_key.clone();
+            // We need to perform negation here to correctly re-create the taptweak
+            // when there is an additional tweak
+            if pk.to_affine().y_is_odd().into() {
+                pk = -pk;
+            }
+            // First calculate the internal taproot key with the first tweak
+            let e = additional_tweak_scalar(&pk, addition_tweak);
+            let internal = ProjectivePoint::GENERATOR * e + pk;
+
+            t = tweak(&internal, &[]);
+            let ec = e * challenge.clone().to_scalar();
+            // T*C needs to account for the additional tweak
+            tc = (t * challenge.clone().to_scalar()) + ec;
+        }
         if tweaked_pubkey.to_affine().y_is_odd().into() {
             z - tc
         } else {
