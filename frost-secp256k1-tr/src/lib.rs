@@ -183,6 +183,17 @@ fn hash_to_scalar(domain: &[u8], msg: &[u8]) -> Scalar {
 /// [spec]: https://www.ietf.org/archive/id/draft-irtf-cfrg-frost-14.html#section-6.5-1
 const CONTEXT_STRING: &str = "FROST-secp256k1-SHA256-TR-v1";
 
+/// Take arbitrary data and convert it to a scalar
+pub fn additional_tweak_scalar<T: AsRef<[u8]>>(
+    public_key: &<<Secp256K1Sha256 as Ciphersuite>::Group as Group>::Element,
+    data: T,
+) -> Scalar {
+    let mut hasher = Sha256::new();
+    hasher.update(public_key.to_affine().x());
+    hasher.update(data);
+    hasher_to_scalar(hasher)
+}
+
 /// An implementation of the FROST(secp256k1, SHA-256) ciphersuite.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Secp256K1Sha256;
@@ -220,16 +231,47 @@ fn tweak<T: AsRef<[u8]>>(
     }
 }
 
+/// Create the pre-taptweak'd internal key
+pub fn tweaked_internal_key<T: AsRef<[u8]>>(
+    public_key: &VerifyingKey,
+    additional_tweak: Option<T>,
+) -> VerifyingKey {
+    let mut pk = public_key.to_element();
+
+    if pk.to_affine().y_is_odd().into() {
+        println!("negating pk");
+        pk = -pk;
+    }
+
+    if let Some(t) = additional_tweak {
+        let e = additional_tweak_scalar(&pk, t);
+        pk = ProjectivePoint::GENERATOR * e + pk;
+    }
+
+    VerifyingKey::new(pk)
+}
+
 /// Create a BIP341 compliant tweaked public key
 fn tweaked_public_key<T: AsRef<[u8]>>(
     public_key: &VerifyingKey,
     merkle_root: Option<T>,
+    additional_tweak: Option<T>,
 ) -> <<Secp256K1Sha256 as Ciphersuite>::Group as Group>::Element {
     let mut pk = public_key.to_element();
     if pk.to_affine().y_is_odd().into() {
         pk = -pk;
     }
-    ProjectivePoint::GENERATOR * tweak(&pk, merkle_root) + pk
+
+    // We apply the additional tweak first
+    if let Some(t) = additional_tweak {
+        let e = additional_tweak_scalar(&pk, t);
+        pk = ProjectivePoint::GENERATOR * e + pk;
+    }
+
+    // Then we apply the taproot tweak
+    pk = ProjectivePoint::GENERATOR * tweak(&pk, merkle_root) + pk;
+
+    pk
 }
 
 /// The message target which the group's signature should commit to. Includes
@@ -259,6 +301,9 @@ pub struct SigningParameters {
     /// then you should set `tapscript_merkle_root` to `Some(vec![])`, which proves
     /// the tapscript commitment for the tweaked output key is unspendable.
     pub tapscript_merkle_root: Option<Vec<u8>>,
+
+    /// Additional Tweak
+    pub additional_tweak: Option<Vec<u8>>,
 }
 
 impl frost_core::SigningParameters for SigningParameters {}
@@ -337,9 +382,11 @@ impl Ciphersuite for Secp256K1Sha256 {
         let tweaked_pk = tweaked_public_key(
             verifying_key,
             sig_target.sig_params().tapscript_merkle_root.as_ref(),
+            sig_target.sig_params().additional_tweak.as_ref(),
         );
-        preimage.extend_from_slice(&R.to_affine().x());
-        preimage.extend_from_slice(&tweaked_pk.to_affine().x());
+
+        preimage.extend_from_slice(&R.to_affine().x().as_ref());
+        preimage.extend_from_slice(&tweaked_pk.to_affine().x().as_ref());
         preimage.extend_from_slice(sig_target.message().as_ref());
         Ok(Challenge::from_scalar(S::H2(&preimage[..])))
     }
@@ -353,16 +400,38 @@ impl Ciphersuite for Secp256K1Sha256 {
         sig_target: &SigningTarget,
     ) -> Result<Signature, Error> {
         let challenge = Self::challenge(&R, verifying_key, sig_target)?;
-
-        let t = tweak(
-            &verifying_key.to_element(),
-            sig_target.sig_params().tapscript_merkle_root.as_ref(),
-        );
-        let tc = t * challenge.to_scalar();
         let tweaked_pubkey = tweaked_public_key(
             verifying_key,
             sig_target.sig_params().tapscript_merkle_root.as_ref(),
+            sig_target.sig_params().additional_tweak.as_ref(),
         );
+        let mut t = tweak(
+            &verifying_key.to_element(),
+            sig_target.sig_params().tapscript_merkle_root.as_ref(),
+        );
+        let mut tc = t * challenge.to_scalar();
+
+        if let Some(at) = sig_target.sig_params().additional_tweak.as_ref() {
+            let mut pk = verifying_key.clone().to_element();
+            // We need to perform negation here to correctly re-create the taptweak
+            // when there is an additional tweak
+            if pk.to_affine().y_is_odd().into() {
+                pk = -pk;
+            }
+            // First calculate the internal taproot key with the first tweak
+            let e = additional_tweak_scalar(&pk, at);
+            let internal = ProjectivePoint::GENERATOR * e + pk;
+
+            let ec = e * challenge.clone().to_scalar();
+
+            t = tweak(
+                &internal,
+                sig_target.sig_params().tapscript_merkle_root.as_ref(),
+            );
+            // T*C needs to account for the additional tweak
+            tc = (t * challenge.clone().to_scalar()) + ec;
+        }
+
         let z_tweaked = if tweaked_pubkey.to_affine().y_is_odd().into() {
             z_raw - tc
         } else {
@@ -380,8 +449,11 @@ impl Ciphersuite for Secp256K1Sha256 {
         verifying_key: &VerifyingKey,
         sig_params: &SigningParameters,
     ) -> Signature {
-        let tweaked_pubkey =
-            tweaked_public_key(verifying_key, sig_params.tapscript_merkle_root.as_ref());
+        let tweaked_pubkey = tweaked_public_key(
+            verifying_key,
+            sig_params.tapscript_merkle_root.as_ref(),
+            sig_params.additional_tweak.as_ref(),
+        );
         let c = challenge.to_scalar();
         let z = if tweaked_pubkey.to_affine().y_is_odd().into() {
             k - (c * secret)
@@ -439,11 +511,14 @@ impl Ciphersuite for Secp256K1Sha256 {
         let mut kp = key_package.clone();
         let public_key = key_package.verifying_key();
         let pubkey_is_odd: bool = public_key.y_is_odd();
-        let tweaked_pubkey_is_odd: bool =
-            tweaked_public_key(public_key, sig_params.tapscript_merkle_root.as_ref())
-                .to_affine()
-                .y_is_odd()
-                .into();
+        let tweaked_pubkey_is_odd: bool = tweaked_public_key(
+            public_key,
+            sig_params.tapscript_merkle_root.as_ref(),
+            sig_params.additional_tweak.as_ref(),
+        )
+        .to_affine()
+        .y_is_odd()
+        .into();
         if pubkey_is_odd != tweaked_pubkey_is_odd {
             kp.negate_signing_share();
         }
@@ -457,8 +532,11 @@ impl Ciphersuite for Secp256K1Sha256 {
         public_key: &VerifyingKey,
         sig_params: &SigningParameters,
     ) -> <Self::Group as Group>::Element {
-        let tweaked_pubkey =
-            tweaked_public_key(public_key, sig_params.tapscript_merkle_root.as_ref());
+        let tweaked_pubkey = tweaked_public_key(
+            public_key,
+            sig_params.tapscript_merkle_root.as_ref(),
+            sig_params.additional_tweak.as_ref(),
+        );
         if Self::Group::y_is_odd(&tweaked_pubkey) {
             -tweaked_pubkey
         } else {
@@ -487,10 +565,20 @@ impl Ciphersuite for Secp256K1Sha256 {
             &public_key.to_element(),
             sig_params.tapscript_merkle_root.as_ref(),
         );
+        let additional_tweak = sig_params.additional_tweak.as_ref();
+
         if Self::Group::y_is_odd(&public_key.to_element()) {
-            -secret + t
+            if let Some(at) = additional_tweak {
+                -secret + t + additional_tweak_scalar(&public_key.to_element(), at)
+            } else {
+                -secret + t
+            }
         } else {
-            secret + t
+            if let Some(at) = additional_tweak {
+                secret + t + additional_tweak_scalar(&public_key.to_element(), at)
+            } else {
+                secret + t
+            }
         }
     }
 
@@ -532,11 +620,14 @@ impl Ciphersuite for Secp256K1Sha256 {
         sig_params: &SigningParameters,
     ) -> <Self::Group as Group>::Element {
         let pubkey_is_odd: bool = verifying_key.to_element().to_affine().y_is_odd().into();
-        let tweaked_pubkey_is_odd: bool =
-            tweaked_public_key(verifying_key, sig_params.tapscript_merkle_root.as_ref())
-                .to_affine()
-                .y_is_odd()
-                .into();
+        let tweaked_pubkey_is_odd: bool = tweaked_public_key(
+            verifying_key,
+            sig_params.tapscript_merkle_root.as_ref(),
+            sig_params.additional_tweak.as_ref(),
+        )
+        .to_affine()
+        .y_is_odd()
+        .into();
 
         let vs = verifying_share.to_element();
         if pubkey_is_odd != tweaked_pubkey_is_odd {
