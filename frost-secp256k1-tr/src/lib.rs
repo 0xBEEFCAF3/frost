@@ -95,6 +95,32 @@ impl Field for Secp256K1ScalarField {
     }
 }
 
+/// The ciphersuite-specific signing parameters which are fed into
+/// signing code to ensure correctly compliant signatures are computed.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct SigningParameters {
+    /// The tapscript merkle tree root which must be committed to and agreed upon
+    /// in advance by all participants in the signing round.
+    ///
+    /// If set to `None` (the default), then no taproot tweak will be committed to in the signature.
+    /// Best practice suggested by BIP341 is to commit to an empty merkle root in cases
+    /// where no tapscript tweak is needed, i.e. by supplying `&[0; u8]` as the merkle root.
+    /// This prevents hiding of taproot commitments inside a linearly aggregated key.
+    ///
+    /// However, for FROST, this is not strictly required as the group key cannot be
+    /// poisoned as long as the DKG procedure is conducted correctly.
+    /// Thus, the [`Default`] trait implementation of taproot `SigningParameters`
+    /// sets `tapscript_merkle_root` to `None`.
+    ///
+    /// If 3rd party observers outside the FROST group must be able to verify there
+    /// is no hidden script-spending path embedded in the FROST group's taproot output key,
+    /// then you should set `tapscript_merkle_root` to `Some(vec![])`, which proves
+    /// the tapscript commitment for the tweaked output key is unspendable.
+    pub tapscript_merkle_root: Option<Vec<u8>>,
+    /// Additional Tweak
+    pub additional_tweak: Option<Vec<u8>>,
+}
+
 /// An implementation of the FROST(secp256k1, SHA-256) ciphersuite group.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Secp256K1Group;
@@ -485,9 +511,18 @@ impl Ciphersuite for Secp256K1Sha256TR {
         // > key should commit to an unspendable script path instead of having
         // > no script path. This can be achieved by computing the output key
         // > point as Q = P + int(hashTapTweak(bytes(P)))G.
+        // let merkle_root = [0u8; 0].to_vec();
+        // TODO(armins) double check this is correct
+        // There should be no additional tweaks present at the time of dkg
+        // But does this mean that we can only sign with a additional tweak of 0 bytes? idk rn
+        let additional_tweak = None;
+        let signing_parameters = SigningParameters {
+            tapscript_merkle_root: None,
+            additional_tweak,
+        };
         Ok((
-            key_package.tweak::<&[u8]>(None),
-            public_key_package.tweak::<&[u8]>(None),
+            key_package.tweak(&signing_parameters),
+            public_key_package.tweak(&signing_parameters),
         ))
     }
 }
@@ -746,12 +781,15 @@ pub mod keys {
     /// Trait for tweaking a key component following BIP-341
     pub trait Tweak: EvenY {
         /// Convert the given type to add a tweak.
-        fn tweak<T: AsRef<[u8]>>(self, merkle_root: Option<T>) -> Self;
+        fn tweak(self, signing_parameters: &SigningParameters) -> Self;
     }
 
     impl Tweak for PublicKeyPackage {
-        fn tweak<T: AsRef<[u8]>>(self, merkle_root: Option<T>) -> Self {
-            let t = tweak(&self.verifying_key().to_element(), merkle_root);
+        fn tweak(self, signing_parameters: &SigningParameters) -> Self {
+            let t = tweak(
+                &self.verifying_key().to_element(),
+                signing_parameters.tapscript_merkle_root.clone(),
+            );
             let tp = ProjectivePoint::GENERATOR * t;
             let public_key_package = self.into_even_y(None);
             let verifying_key =
@@ -771,8 +809,11 @@ pub mod keys {
     }
 
     impl Tweak for KeyPackage {
-        fn tweak<T: AsRef<[u8]>>(self, merkle_root: Option<T>) -> Self {
-            let t = tweak(&self.verifying_key().to_element(), merkle_root);
+        fn tweak(self, signing_parameters: &SigningParameters) -> Self {
+            let t = tweak(
+                &self.verifying_key().to_element(),
+                signing_parameters.tapscript_merkle_root.clone(),
+            );
             let tp = ProjectivePoint::GENERATOR * t;
             let key_package = self.into_even_y(None);
             let verifying_key = VerifyingKey::new(key_package.verifying_key().to_element() + tp);
@@ -863,9 +904,9 @@ pub mod round2 {
         signing_package: &SigningPackage,
         signer_nonces: &round1::SigningNonces,
         key_package: &keys::KeyPackage,
-        merkle_root: Option<&[u8]>,
+        signing_parameters: &SigningParameters,
     ) -> Result<SignatureShare, Error> {
-        let key_package = key_package.clone().tweak(merkle_root);
+        let key_package = key_package.clone().tweak(signing_parameters);
         frost::round2::sign(signing_package, signer_nonces, &key_package)
     }
 }
@@ -901,9 +942,9 @@ pub fn aggregate_with_tweak(
     signing_package: &SigningPackage,
     signature_shares: &BTreeMap<Identifier, round2::SignatureShare>,
     public_key_package: &keys::PublicKeyPackage,
-    merkle_root: Option<&[u8]>,
+    signing_parameters: &SigningParameters,
 ) -> Result<Signature, Error> {
-    let public_key_package = public_key_package.clone().tweak(merkle_root);
+    let public_key_package = public_key_package.clone().tweak(signing_parameters);
     frost::aggregate(signing_package, signature_shares, &public_key_package)
 }
 

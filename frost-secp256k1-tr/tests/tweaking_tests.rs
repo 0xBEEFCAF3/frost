@@ -46,6 +46,10 @@ fn check_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
     let mut signature_shares = BTreeMap::new();
     let message = "message to sign".as_bytes();
     let signing_package = frost::SigningPackage::new(commitments_map, message);
+    let signing_parameters = SigningParameters {
+        tapscript_merkle_root: Some(merkle_root),
+        additional_tweak: None,
+    };
 
     for participant_identifier in nonces_map.keys() {
         let key_package = &key_packages[participant_identifier];
@@ -54,7 +58,7 @@ fn check_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
             &signing_package,
             nonces,
             key_package,
-            Some(&merkle_root),
+            Some(&signing_parameters),
         )?;
         signature_shares.insert(*participant_identifier, signature_share);
     }
@@ -63,7 +67,7 @@ fn check_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
         &signing_package,
         &signature_shares,
         &pubkey_package,
-        Some(&merkle_root),
+        Some(&signing_parameters),
     )?;
 
     pubkey_package
@@ -71,7 +75,7 @@ fn check_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
         .verify(message, &group_signature)
         .expect_err("signature should not be valid for untweaked pubkey_package");
 
-    let pubkey_package_tweaked = pubkey_package.clone().tweak(Some(&merkle_root));
+    let pubkey_package_tweaked = pubkey_package.clone().tweak(&signing_parameters);
     pubkey_package_tweaked
         .verifying_key()
         .verify(message, &group_signature)
@@ -92,7 +96,7 @@ fn check_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
             .to_affine()
             .x()
             .into(),
-        &merkle_root,
+        &signing_parameters.tapscript_merkle_root.unwrap(),
     );
 
     let tr_output_point = pubkey_package_tweaked
