@@ -814,28 +814,33 @@ pub mod keys {
                 internal_pk = tweaked_internal_key(&internal_pk, additional_tweak);
             }
             let public_key_package = self.into_even_y(None);
-            let t = tweak(
-                &internal_pk.to_element(),
-                signing_parameters.tapscript_merkle_root.clone(),
-            );
-            
-            let e = additional_tweak_scalar(
-                &public_key_package.verifying_key().to_element(),
-                signing_parameters.clone().additional_tweak.unwrap(),
-            );
-            let tweak_scalar = t + e;
-            let eg = ProjectivePoint::GENERATOR * e;
-            let tg = ProjectivePoint::GENERATOR * t;
+            let tweak_point = {
+                let t = tweak(
+                    &internal_pk.to_element(),
+                    signing_parameters.tapscript_merkle_root.clone(),
+                );
+                let tg = ProjectivePoint::GENERATOR * t;
+                if let Some(additional_tweak) = &signing_parameters.additional_tweak {
+                    let e = additional_tweak_scalar(
+                        &public_key_package.verifying_key().to_element(),
+                        additional_tweak,
+                    );
+                    let eg = ProjectivePoint::GENERATOR * e;
+                    eg + tg
+                } else {
+                    tg
+                }
+            };
 
             let verifying_key =
-                VerifyingKey::new(public_key_package.verifying_key().to_element() + eg + tg);
+                VerifyingKey::new(public_key_package.verifying_key().to_element() + tweak_point);
             // Recreate verifying share map with negated VerifyingShares
             // values.
             let verifying_shares: BTreeMap<_, _> = public_key_package
                 .verifying_shares()
                 .iter()
                 .map(|(i, vs)| {
-                    let vs = VerifyingShare::new(vs.to_element() + eg + tg);
+                    let vs = VerifyingShare::new(vs.to_element() + tweak_point);
                     (*i, vs)
                 })
                 .collect();
@@ -846,29 +851,34 @@ pub mod keys {
     impl Tweak for KeyPackage {
         fn tweak(self, signing_parameters: &SigningParameters) -> Self {
             let mut internal_pk = self.verifying_key().clone();
+            let key_package = self.into_even_y(None);
             if let Some(additional_tweak) = &signing_parameters.additional_tweak {
                 internal_pk = tweaked_internal_key(&internal_pk, additional_tweak);
             }
-            let key_package = self.into_even_y(None);
-            let t = tweak(
-                &internal_pk.to_element(),
-                signing_parameters.tapscript_merkle_root.clone(),
-            );
-
-            let e = additional_tweak_scalar(
-                &key_package.verifying_key().to_element(),
-                signing_parameters.clone().additional_tweak.unwrap(),
-            );
-            let tweak_scalar = t + e;
-
-            let eg = ProjectivePoint::GENERATOR * e;
-            let tg = ProjectivePoint::GENERATOR * t;
+            let (tweak_point, tweak_scalar) = {
+                let t = tweak(
+                    &internal_pk.to_element(),
+                    signing_parameters.tapscript_merkle_root.clone(),
+                );
+                let tg = ProjectivePoint::GENERATOR * t;
+                if let Some(additional_tweak) = &signing_parameters.additional_tweak {
+                    let e = additional_tweak_scalar(
+                        &key_package.verifying_key().to_element(),
+                        additional_tweak,
+                    );
+                    let eg = ProjectivePoint::GENERATOR * e;
+                    (eg + tg, t + e)
+                } else {
+                    (tg, t)
+                }
+            };
 
             let verifying_key =
-                VerifyingKey::new(key_package.verifying_key().to_element() + eg + tg);
-            let signing_share = SigningShare::new(key_package.signing_share().to_scalar() + tweak_scalar);
+                VerifyingKey::new(key_package.verifying_key().to_element() + tweak_point);
+            let signing_share =
+                SigningShare::new(key_package.signing_share().to_scalar() + tweak_scalar);
             let verifying_share =
-                VerifyingShare::new(key_package.verifying_share().to_element() + eg + tg);
+                VerifyingShare::new(key_package.verifying_share().to_element() + tweak_point);
 
             KeyPackage::new(
                 *key_package.identifier(),
