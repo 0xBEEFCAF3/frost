@@ -84,6 +84,10 @@ fn check_additional_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
         .verify(message, &group_signature)
         .expect("signature should be valid for tweaked pubkey_package");
 
+    let vk_tweaked = pubkey_package.verifying_key().tweak(&signing_parameters);
+
+    assert_eq!(vk_tweaked, pubkey_package_tweaked.verifying_key().clone());
+
     helpers::verify_signature(
         message,
         &group_signature,

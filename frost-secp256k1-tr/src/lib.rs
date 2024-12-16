@@ -807,6 +807,34 @@ pub mod keys {
         fn tweak(self, signing_parameters: &SigningParameters) -> Self;
     }
 
+    impl Tweak for VerifyingKey {
+        fn tweak(self, signing_parameters: &SigningParameters) -> Self {
+            let mut internal_pk = self.clone();
+            if let Some(additional_tweak) = &signing_parameters.additional_tweak {
+                internal_pk = tweaked_internal_key(&internal_pk, additional_tweak);
+            }
+
+            let tweak_point = {
+                let t = tweak(
+                    &internal_pk.to_element(),
+                    signing_parameters.tapscript_merkle_root.clone(),
+                );
+                let tg = ProjectivePoint::GENERATOR * t;
+                if let Some(additional_tweak) = &signing_parameters.additional_tweak {
+                    let e = additional_tweak_scalar(
+                        &self.to_element(),
+                        additional_tweak,
+                    );
+                    let eg = ProjectivePoint::GENERATOR * e;
+                    eg + tg
+                } else {
+                    tg
+                }
+            };
+            VerifyingKey::new(self.to_element() + tweak_point)
+        }
+    }
+
     impl Tweak for PublicKeyPackage {
         fn tweak(self, signing_parameters: &SigningParameters) -> Self {
             let mut internal_pk = self.verifying_key().clone();
