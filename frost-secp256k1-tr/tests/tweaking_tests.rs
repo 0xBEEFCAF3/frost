@@ -61,7 +61,7 @@ fn check_additional_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
             &signing_package,
             nonces,
             key_package,
-            Some(&signing_parameters),
+            &signing_parameters,
         )?;
         signature_shares.insert(*participant_identifier, signature_share);
     }
@@ -70,7 +70,7 @@ fn check_additional_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
         &signing_package,
         &signature_shares,
         &pubkey_package,
-        Some(&signing_parameters),
+        &signing_parameters,
     )?;
 
     pubkey_package
@@ -179,7 +179,7 @@ fn check_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
             &signing_package,
             nonces,
             key_package,
-            Some(&signing_parameters),
+            &signing_parameters,
         )?;
         signature_shares.insert(*participant_identifier, signature_share);
     }
@@ -188,7 +188,7 @@ fn check_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
         &signing_package,
         &signature_shares,
         &pubkey_package,
-        Some(&signing_parameters),
+        &signing_parameters,
     )?;
 
     pubkey_package
