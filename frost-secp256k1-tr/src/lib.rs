@@ -95,6 +95,32 @@ impl Field for Secp256K1ScalarField {
     }
 }
 
+/// The ciphersuite-specific signing parameters which are fed into
+/// signing code to ensure correctly compliant signatures are computed.
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub struct SigningParameters {
+    /// The tapscript merkle tree root which must be committed to and agreed upon
+    /// in advance by all participants in the signing round.
+    ///
+    /// If set to `None` (the default), then no taproot tweak will be committed to in the signature.
+    /// Best practice suggested by BIP341 is to commit to an empty merkle root in cases
+    /// where no tapscript tweak is needed, i.e. by supplying `&[0; u8]` as the merkle root.
+    /// This prevents hiding of taproot commitments inside a linearly aggregated key.
+    ///
+    /// However, for FROST, this is not strictly required as the group key cannot be
+    /// poisoned as long as the DKG procedure is conducted correctly.
+    /// Thus, the [`Default`] trait implementation of taproot `SigningParameters`
+    /// sets `tapscript_merkle_root` to `None`.
+    ///
+    /// If 3rd party observers outside the FROST group must be able to verify there
+    /// is no hidden script-spending path embedded in the FROST group's taproot output key,
+    /// then you should set `tapscript_merkle_root` to `Some(vec![])`, which proves
+    /// the tapscript commitment for the tweaked output key is unspendable.
+    pub tapscript_merkle_root: Option<Vec<u8>>,
+    /// Additional Tweak
+    pub additional_tweak: Option<Vec<u8>>,
+}
+
 /// An implementation of the FROST(secp256k1, SHA-256) ciphersuite group.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Secp256K1Group;
@@ -183,6 +209,17 @@ const CONTEXT_STRING: &str = "FROST-secp256k1-SHA256-TR-v1";
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Secp256K1Sha256TR;
 
+/// Take arbitrary data and convert it to a scalar
+pub fn additional_tweak_scalar<T: AsRef<[u8]>>(
+    public_key: &<<Secp256K1Sha256TR as Ciphersuite>::Group as Group>::Element,
+    data: T,
+) -> Scalar {
+    let mut hasher = Sha256::new();
+    hasher.update(public_key.to_affine().x());
+    hasher.update(data);
+    hasher_to_scalar(hasher)
+}
+
 /// Digest the hasher to a Scalar
 fn hasher_to_scalar(hasher: Sha256) -> Scalar {
     // This is acceptable because secp256k1 curve order is close to 2^256,
@@ -208,7 +245,11 @@ fn tweak<T: AsRef<[u8]>>(
     merkle_root: Option<T>,
 ) -> Scalar {
     match merkle_root {
-        None => Secp256K1ScalarField::zero(),
+        None => {
+            let mut hasher = tagged_hash("TapTweak");
+            hasher.update(public_key.to_affine().x());
+            hasher_to_scalar(hasher)
+        }
         Some(root) => {
             let mut hasher = tagged_hash("TapTweak");
             hasher.update(public_key.to_affine().x());
@@ -216,6 +257,18 @@ fn tweak<T: AsRef<[u8]>>(
             hasher_to_scalar(hasher)
         }
     }
+}
+
+/// Create the pre-taptweak'd tweaked internal key
+pub fn tweaked_internal_key<T: AsRef<[u8]>>(
+    public_key: &VerifyingKey,
+    additional_tweak: T,
+) -> VerifyingKey {
+    let mut pk = public_key.into_even_y(None).to_element();
+    let e = additional_tweak_scalar(&pk, additional_tweak);
+    let eg = ProjectivePoint::GENERATOR * e;
+    pk = eg + pk;
+    VerifyingKey::new(pk)
 }
 
 // Negate a Nonce
@@ -481,10 +534,18 @@ impl Ciphersuite for Secp256K1Sha256TR {
         // > key should commit to an unspendable script path instead of having
         // > no script path. This can be achieved by computing the output key
         // > point as Q = P + int(hashTapTweak(bytes(P)))G.
-        let merkle_root = [0u8; 0];
+        // let merkle_root = [0u8; 0].to_vec();
+        // TODO(armins) double check this is correct
+        // There should be no additional tweaks present at the time of dkg
+        // But does this mean that we can only sign with a additional tweak of 0 bytes? idk rn
+        let additional_tweak = None;
+        let signing_parameters = SigningParameters {
+            tapscript_merkle_root: None,
+            additional_tweak,
+        };
         Ok((
-            key_package.tweak(Some(&merkle_root)),
-            public_key_package.tweak(Some(&merkle_root)),
+            key_package.tweak(&signing_parameters),
+            public_key_package.tweak(&signing_parameters),
         ))
     }
 }
@@ -743,23 +804,73 @@ pub mod keys {
     /// Trait for tweaking a key component following BIP-341
     pub trait Tweak: EvenY {
         /// Convert the given type to add a tweak.
-        fn tweak<T: AsRef<[u8]>>(self, merkle_root: Option<T>) -> Self;
+        fn tweak(self, signing_parameters: &SigningParameters) -> Self;
+    }
+
+    impl Tweak for VerifyingKey {
+        fn tweak(self, signing_parameters: &SigningParameters) -> Self {
+            let mut internal_pk = self.clone();
+            if let Some(additional_tweak) = &signing_parameters.additional_tweak {
+                // Note that tweaked internal key will tweak with a even y key
+                internal_pk = tweaked_internal_key(&internal_pk, additional_tweak);
+            }
+
+            let tweak_point = {
+                let t = tweak(
+                    &internal_pk.to_element(),
+                    signing_parameters.tapscript_merkle_root.clone(),
+                );
+                let tg = ProjectivePoint::GENERATOR * t;
+                if let Some(additional_tweak) = &signing_parameters.additional_tweak {
+                    let e = additional_tweak_scalar(
+                        &self.to_element(),
+                        additional_tweak,
+                    );
+                    let eg = ProjectivePoint::GENERATOR * e;
+                    eg + tg
+                } else {
+                    tg
+                }
+            };
+            let vk_y_even = self.into_even_y(None);
+            VerifyingKey::new(vk_y_even.to_element() + tweak_point)
+        }
     }
 
     impl Tweak for PublicKeyPackage {
-        fn tweak<T: AsRef<[u8]>>(self, merkle_root: Option<T>) -> Self {
-            let t = tweak(&self.verifying_key().to_element(), merkle_root);
-            let tp = ProjectivePoint::GENERATOR * t;
+        fn tweak(self, signing_parameters: &SigningParameters) -> Self {
+            let mut internal_pk = self.verifying_key().clone();
+            if let Some(additional_tweak) = &signing_parameters.additional_tweak {
+                internal_pk = tweaked_internal_key(&internal_pk, additional_tweak);
+            }
             let public_key_package = self.into_even_y(None);
+            let tweak_point = {
+                let t = tweak(
+                    &internal_pk.to_element(),
+                    signing_parameters.tapscript_merkle_root.clone(),
+                );
+                let tg = ProjectivePoint::GENERATOR * t;
+                if let Some(additional_tweak) = &signing_parameters.additional_tweak {
+                    let e = additional_tweak_scalar(
+                        &public_key_package.verifying_key().to_element(),
+                        additional_tweak,
+                    );
+                    let eg = ProjectivePoint::GENERATOR * e;
+                    eg + tg
+                } else {
+                    tg
+                }
+            };
+
             let verifying_key =
-                VerifyingKey::new(public_key_package.verifying_key().to_element() + tp);
+                VerifyingKey::new(public_key_package.verifying_key().to_element() + tweak_point);
             // Recreate verifying share map with negated VerifyingShares
             // values.
             let verifying_shares: BTreeMap<_, _> = public_key_package
                 .verifying_shares()
                 .iter()
                 .map(|(i, vs)| {
-                    let vs = VerifyingShare::new(vs.to_element() + tp);
+                    let vs = VerifyingShare::new(vs.to_element() + tweak_point);
                     (*i, vs)
                 })
                 .collect();
@@ -768,14 +879,37 @@ pub mod keys {
     }
 
     impl Tweak for KeyPackage {
-        fn tweak<T: AsRef<[u8]>>(self, merkle_root: Option<T>) -> Self {
-            let t = tweak(&self.verifying_key().to_element(), merkle_root);
-            let tp = ProjectivePoint::GENERATOR * t;
+        fn tweak(self, signing_parameters: &SigningParameters) -> Self {
+            let mut internal_pk = self.verifying_key().clone();
             let key_package = self.into_even_y(None);
-            let verifying_key = VerifyingKey::new(key_package.verifying_key().to_element() + tp);
-            let signing_share = SigningShare::new(key_package.signing_share().to_scalar() + t);
+            if let Some(additional_tweak) = &signing_parameters.additional_tweak {
+                internal_pk = tweaked_internal_key(&internal_pk, additional_tweak);
+            }
+            let (tweak_point, tweak_scalar) = {
+                let t = tweak(
+                    &internal_pk.to_element(),
+                    signing_parameters.tapscript_merkle_root.clone(),
+                );
+                let tg = ProjectivePoint::GENERATOR * t;
+                if let Some(additional_tweak) = &signing_parameters.additional_tweak {
+                    let e = additional_tweak_scalar(
+                        &key_package.verifying_key().to_element(),
+                        additional_tweak,
+                    );
+                    let eg = ProjectivePoint::GENERATOR * e;
+                    (eg + tg, t + e)
+                } else {
+                    (tg, t)
+                }
+            };
+
+            let verifying_key =
+                VerifyingKey::new(key_package.verifying_key().to_element() + tweak_point);
+            let signing_share =
+                SigningShare::new(key_package.signing_share().to_scalar() + tweak_scalar);
             let verifying_share =
-                VerifyingShare::new(key_package.verifying_share().to_element() + tp);
+                VerifyingShare::new(key_package.verifying_share().to_element() + tweak_point);
+
             KeyPackage::new(
                 *key_package.identifier(),
                 signing_share,
@@ -787,6 +921,7 @@ pub mod keys {
     }
 
     pub mod dkg;
+    pub mod refresh;
     pub mod repairable;
 }
 
@@ -859,14 +994,10 @@ pub mod round2 {
         signing_package: &SigningPackage,
         signer_nonces: &round1::SigningNonces,
         key_package: &keys::KeyPackage,
-        merkle_root: Option<&[u8]>,
+        signing_parameters: &SigningParameters,
     ) -> Result<SignatureShare, Error> {
-        if merkle_root.is_some() {
-            let key_package = key_package.clone().tweak(merkle_root);
-            frost::round2::sign(signing_package, signer_nonces, &key_package)
-        } else {
-            frost::round2::sign(signing_package, signer_nonces, key_package)
-        }
+        let key_package = key_package.clone().tweak(signing_parameters);
+        frost::round2::sign(signing_package, signer_nonces, &key_package)
     }
 }
 
@@ -901,14 +1032,10 @@ pub fn aggregate_with_tweak(
     signing_package: &SigningPackage,
     signature_shares: &BTreeMap<Identifier, round2::SignatureShare>,
     public_key_package: &keys::PublicKeyPackage,
-    merkle_root: Option<&[u8]>,
+    signing_parameters: &SigningParameters,
 ) -> Result<Signature, Error> {
-    if merkle_root.is_some() {
-        let public_key_package = public_key_package.clone().tweak(merkle_root);
-        frost::aggregate(signing_package, signature_shares, &public_key_package)
-    } else {
-        frost::aggregate(signing_package, signature_shares, public_key_package)
-    }
+    let public_key_package = public_key_package.clone().tweak(signing_parameters);
+    frost::aggregate(signing_package, signature_shares, &public_key_package)
 }
 
 /// A signing key for a Schnorr signature on FROST(secp256k1, SHA-256).
