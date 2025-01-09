@@ -8,13 +8,51 @@ use sha2::{Digest, Sha256};
 use frost_secp256k1_tr::*;
 
 mod helpers;
+use frost_secp256k1_tr as frost;
+use rand::thread_rng;
+use std::collections::BTreeMap;
+
+#[test]
+fn check_tweaked_vk() -> Result<(), Box<dyn Error>> {
+    let num_iterations = 1_000;
+    let additional_tweak: Vec<u8> = vec![12; 20];
+    let mut rng = thread_rng();
+    let max_signers = 5;
+    let min_signers = 3;
+
+    for i in 0..num_iterations {
+        println!("Iteration {}", i);
+    /* KEY GENERATION */
+    let (shares, pubkey_package) = frost::keys::generate_with_dealer(
+        max_signers,
+        min_signers,
+        frost::keys::IdentifierList::Default,
+        &mut rng,
+    )?;
+    let mut key_packages: BTreeMap<_, _> = BTreeMap::new();
+    for (identifier, secret_share) in shares {
+        let key_package = frost::keys::KeyPackage::try_from(secret_share)?;
+        key_packages.insert(identifier, key_package);
+    }
+
+    let signing_parameters = SigningParameters {
+        tapscript_merkle_root: None,
+        additional_tweak: Some(additional_tweak.clone()),
+    };
+
+    let vk = pubkey_package.verifying_key();
+
+    let vk_tweaked = vk.tweak(&signing_parameters);
+    let pubkey_package_tweaked = pubkey_package.clone().tweak(&signing_parameters);
+
+        assert_eq!(vk_tweaked, pubkey_package_tweaked.verifying_key().clone());
+    }
+
+    Ok(())
+}
 
 #[test]
 fn check_additional_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
-    use frost_secp256k1_tr as frost;
-    use rand::thread_rng;
-    use std::collections::BTreeMap;
-
     let merkle_root: Vec<u8> = vec![12; 32];
     let additional_tweak: Vec<u8> = vec![12; 20];
     let mut rng = thread_rng();
@@ -128,7 +166,6 @@ fn check_additional_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
-
 
 #[test]
 fn check_tweaked_sign_with_dealer() -> Result<(), Box<dyn Error>> {

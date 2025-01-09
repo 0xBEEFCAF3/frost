@@ -811,6 +811,7 @@ pub mod keys {
         fn tweak(self, signing_parameters: &SigningParameters) -> Self {
             let mut internal_pk = self.clone();
             if let Some(additional_tweak) = &signing_parameters.additional_tweak {
+                // Note that tweaked internal key will tweak with a even y key
                 internal_pk = tweaked_internal_key(&internal_pk, additional_tweak);
             }
 
@@ -831,7 +832,8 @@ pub mod keys {
                     tg
                 }
             };
-            VerifyingKey::new(self.to_element() + tweak_point)
+            let vk_y_even = self.into_even_y(None);
+            VerifyingKey::new(vk_y_even.to_element() + tweak_point)
         }
     }
 
