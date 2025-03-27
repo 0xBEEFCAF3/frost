@@ -17,17 +17,14 @@ fn sign_key_package() -> Result<(), Box<dyn Error>> {
         &mut rng,
     )?;
     let mut key_packages: BTreeMap<_, _> = BTreeMap::new();
+    let mut signatures: BTreeMap<_, _> = BTreeMap::new();
     for (identifier, secret_share) in shares {
         let key_package = frost::keys::KeyPackage::try_from(secret_share)?;
-        key_packages.insert(identifier, key_package);
+        key_packages.insert(identifier, key_package.clone());
+        let signature = frost::keys::dkg::attest_to_key_package(key_package, &mut rng)?;
+        signatures.insert(identifier, signature);
     }
 
-    let identifier = key_packages.keys().next().unwrap();
-    let key_package = key_packages.get(identifier).unwrap().clone();
-    let signature = frost::keys::dkg::attest_to_key_package(key_package, &mut rng)?;
-
-    println!("Signature: {:?}", signature);
-    // TODO verify signature
-
+    frost::keys::dkg::verify_round3_attestations(&pubkey_package, &signatures)?;
     Ok(())
 }

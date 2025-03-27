@@ -139,3 +139,26 @@ pub fn attest_to_key_package<R: RngCore + CryptoRng>(key_package: KeyPackage, mu
 
     Ok(signature)
 }
+
+
+/// Verify a n signatures over the aggregate threshold key package
+pub fn verify_round3_attestations(public_key_package: &PublicKeyPackage, attestations: &BTreeMap<Identifier, Signature>) -> Result<(), Error> {
+    assert!(attestations.len() == public_key_package.verifying_shares().len());
+    // sort both maps by identifier
+
+    let vpk = public_key_package.verifying_key();
+    let G = <Secp256K1Sha256TR as Ciphersuite>::Group::generator();
+    // TODO: figure out ordering of keys in public_key_package and signatures
+    for (identifier, vs) in public_key_package.verifying_shares().iter() {
+        let signature = attestations.get(identifier).ok_or(Error::InvalidSignature)?;
+        let R = signature.R();
+        let z = signature.z();
+        let challenge = challenge_key_package(identifier, &vpk, vs, &R)?;
+        // Schnorr verification
+        if *R != G * z - vs.to_element() * challenge.to_scalar() {
+            return Err(Error::InvalidSignature);
+        }
+    }
+
+    Ok(())
+}
