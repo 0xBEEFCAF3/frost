@@ -101,3 +101,64 @@ pub fn part3(
 ) -> Result<(KeyPackage, PublicKeyPackage), Error> {
     frost::keys::dkg::part3(round2_secret_package, round1_packages, round2_packages)
 }
+
+/// HDKG for FROST(secp256k1, SHA-256) termination condition
+fn HDKGT(m: &[u8]) -> Scalar {
+    hash_to_scalar(&[CONTEXT_STRING.as_bytes(), b"dkgt"], m)
+}
+
+fn challenge_key_package(
+    identifier: &Identifier,
+    verifying_key: &VerifyingKey,
+    verifying_share: &VerifyingShare,
+    R: &Element<Secp256K1Sha256TR>,
+) -> Result<Challenge<Secp256K1Sha256TR>, Error> {
+    let mut preimage = vec![];
+
+    preimage.extend_from_slice(identifier.serialize().as_ref());
+    preimage.extend_from_slice(<Secp256K1Sha256TR as Ciphersuite>::Group::serialize(&verifying_share.to_element())?.as_ref());
+    preimage.extend_from_slice(<Secp256K1Sha256TR as Ciphersuite>::Group::serialize(&verifying_key.to_element())?.as_ref());
+    preimage.extend_from_slice(<Secp256K1Sha256TR as Ciphersuite>::Group::serialize(R)?.as_ref());
+
+    let scalar = HDKGT(&preimage[..]);
+    let challenge = Challenge::<Secp256K1Sha256TR>::from_scalar(scalar);
+    Ok(challenge)
+}
+
+/// Compute a signature over the key package
+pub fn attest_to_key_package<R: RngCore + CryptoRng>(key_package: KeyPackage, mut rng: R) -> Result<Signature, Error> {
+    let (k, R) = <Secp256K1Sha256TR as Ciphersuite>::generate_nonce(&mut rng);
+    let vpk = key_package.verifying_key();
+    let vs = key_package.verifying_share();
+
+    let challenge = challenge_key_package(key_package.identifier(), &vpk, &vs, &R)?;
+
+    let sk = key_package.signing_share().to_scalar();
+    let mu = k + sk * challenge.to_scalar();
+    let signature = Signature::new(R, mu);
+
+    Ok(signature)
+}
+
+
+/// Verify a n signatures over the aggregate threshold key package
+pub fn verify_round3_attestations(public_key_package: &PublicKeyPackage, attestations: &BTreeMap<Identifier, Signature>) -> Result<(), Error> {
+    assert!(attestations.len() == public_key_package.verifying_shares().len());
+    // sort both maps by identifier
+
+    let vpk = public_key_package.verifying_key();
+    let G = <Secp256K1Sha256TR as Ciphersuite>::Group::generator();
+    // TODO: figure out ordering of keys in public_key_package and signatures
+    for (identifier, vs) in public_key_package.verifying_shares().iter() {
+        let signature = attestations.get(identifier).ok_or(Error::InvalidSignature)?;
+        let R = signature.R();
+        let z = signature.z();
+        let challenge = challenge_key_package(identifier, &vpk, vs, &R)?;
+        // Schnorr verification
+        if *R != G * z - vs.to_element() * challenge.to_scalar() {
+            return Err(Error::InvalidSignature);
+        }
+    }
+
+    Ok(())
+}
